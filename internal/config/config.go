@@ -7,12 +7,22 @@ import (
 	"github.com/joho/godotenv"
 )
 
-type Config struct {
-	Port   string
-	AppEnv string
+type DatabaseConfig struct {
+	Host        string
+	Port        string
+	User        string
+	Password    string
+	Name        string
+	SSLMode     string
+	SSLRootCert string
 }
 
-// Load reads environment variables from .env file and returns a Config struct.
+type Config struct {
+	Port     string
+	AppEnv   string
+	Database DatabaseConfig
+}
+
 func Load() *Config {
 	if err := godotenv.Load(); err != nil {
 		log.Fatal("Error loading .env file: ", err)
@@ -21,6 +31,15 @@ func Load() *Config {
 	cfg := &Config{
 		Port:   getEnv("PORT", "8080"),
 		AppEnv: getEnv("APP_ENV", "development"),
+		Database: DatabaseConfig{
+			Host:     requireEnv("DB_HOST"),
+			Port:     getEnv("DB_PORT", "5432"),
+			User:     requireEnv("DB_USER"),
+			Password: requireEnv("DB_PASSWORD"),
+			Name:     requireEnv("DB_NAME"),
+			SSLMode:     getEnv("DB_SSLMODE", "verify-full"),
+			SSLRootCert: requireEnv("DB_SSL_ROOT_CERT"),
+		},
 	}
 
 	cfg.validate()
@@ -44,9 +63,31 @@ func getEnv(key, fallback string) string {
 	return value
 }
 
+func requireEnv(key string) string {
+	value, exists := os.LookupEnv(key)
+
+	if !exists {
+		log.Fatalf("[FATAL] Required environment variable %s is not set", key)
+	}
+
+	if value == "" {
+		log.Fatalf("[FATAL] Required environment variable %s is empty", key)
+	}
+
+	return value
+}
+
 func (c *Config) validate() {
 	if c.AppEnv != "production" {
 		log.Printf("[WARNING] APP_ENV is set to %q — not recommended for production deployment", c.AppEnv)
+	}
+
+	if c.Database.SSLMode != "verify-full" && c.Database.SSLMode != "verify-ca" {
+		log.Printf("[WARNING] DB_SSLMODE is set to %q — consider using \"verify-full\" for maximum security", c.Database.SSLMode)
+	}
+
+	if _, err := os.Stat(c.Database.SSLRootCert); os.IsNotExist(err) {
+		log.Fatalf("[FATAL] SSL root certificate file not found: %s", c.Database.SSLRootCert)
 	}
 }
 
