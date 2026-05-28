@@ -18,18 +18,35 @@ func Load() *Config {
 		log.Fatal("Error loading .env file: ", err)
 	}
 
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080"
+	cfg := &Config{
+		Port:   getEnv("PORT", "8080"),
+		AppEnv: getEnv("APP_ENV", "development"),
 	}
 
-	appEnv := os.Getenv("APP_ENV")
-	if appEnv == "" {
-		appEnv = "development"
+	cfg.validate()
+
+	return cfg
+}
+
+func getEnv(key, fallback string) string {
+	value, exists := os.LookupEnv(key)
+
+	if !exists {
+		log.Printf("[WARNING] Environment variable %s is not set, using default: %q", key, fallback)
+		return fallback
 	}
 
-	return &Config{
-		Port:   port,
-		AppEnv: appEnv,
+	if value == "" {
+		log.Printf("[WARNING] Environment variable %s is empty, using default: %q", key, fallback)
+		return fallback
+	}
+
+	return value
+}
+
+func (c *Config) validate() {
+	if c.AppEnv != "production" {
+		log.Printf("[WARNING] APP_ENV is set to %q — not recommended for production deployment", c.AppEnv)
 	}
 }
+
