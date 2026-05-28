@@ -38,22 +38,22 @@ func Run(router *gin.Engine, cfg *config.Config) {
 	defer stop()
 
 	go func() {
-		log.Printf("Server starting on port %s (env: %s)", cfg.Port, cfg.AppEnv)
+		log.Printf("[INFO] Server is starting on port %s (env: %s)", cfg.Port, cfg.AppEnv)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Fatalf("Failed to start server: %v", err)
+			log.Fatalf("[FATAL] Failed to start server: %v", err)
 		}
 	}()
 
 	<-ctx.Done()
 	stop()
-	log.Println("Shutting down server...")
+	log.Println("[INFO] Shutting down server...")
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+		log.Printf("[WARNING] Server forced to shutdown: %v", err)
 	}
 
-	log.Println("Server exited gracefully")
+	log.Println("[INFO] Server exited gracefully")
 }

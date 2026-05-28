@@ -32,13 +32,13 @@ func Connect(cfg *config.Config) *gorm.DB {
 		Logger: logger.Default.LogMode(logLevel),
 	})
 	if err != nil {
-		log.Fatalf("[FATAL] Failed to connect to database: %v", err)
+		log.Fatalf("[ERROR] Failed to connect to database: %v", err)
 	}
 
 	// Configure connection pooling on the underlying *sql.DB.
 	sqlDB, err := db.DB()
 	if err != nil {
-		log.Fatalf("[FATAL] Failed to get underlying database connection: %v", err)
+		log.Fatalf("[ERROR] Failed to get underlying database connection: %v", err)
 	}
 
 	sqlDB.SetMaxIdleConns(10)
@@ -46,10 +46,10 @@ func Connect(cfg *config.Config) *gorm.DB {
 	sqlDB.SetConnMaxLifetime(30 * time.Minute)
 
 	if err := sqlDB.Ping(); err != nil {
-		log.Fatalf("[FATAL] Failed to ping database: %v", err)
+		log.Fatalf("[ERROR] Failed to ping database: %v", err)
 	}
 
-	log.Println("Database connected successfully")
+	log.Println("[INFO] Database connected successfully")
 
 	return db
 }
@@ -66,5 +66,5 @@ func Close(db *gorm.DB) {
 		return
 	}
 
-	log.Println("Database connection closed")
+	log.Println("[INFO] Database connection closed")
 }
