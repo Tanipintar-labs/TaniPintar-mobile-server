@@ -1,0 +1,28 @@
+.git
+.env
+.env.example
+.gitignore
+.dockerignore
+.air.toml
+compose.yaml
+compose.dev.yaml
+Dockerfile.dev
+tmp/
+
+# SSL certificates (mounted at runtime, not baked into image)
+certs/
+
+# Documentation
+*.md
+LICENSE
+
+# Editor/IDE
+.idea/
+.vscode/
+.gemini/
+
+# Binaries
+*.exe
+*.dll
+*.so
+*.dylib
