@@ -25,7 +25,7 @@ func Connect(cfg *config.Config) *gorm.DB {
 
 	logLevel := logger.Info
 	if cfg.AppEnv == "production" {
-		logLevel = logger.Silent
+		logLevel = logger.Error
 	}
 
 	db, err := gorm.Open(postgres.Open(dsn), &gorm.Config{
