@@ -51,6 +51,8 @@ func Connect(cfg *config.Config) *gorm.DB {
 
 	log.Println("[INFO] Database connected successfully")
 
+	RunMigrations(db)
+
 	return db
 }
 

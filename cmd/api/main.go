@@ -13,7 +13,7 @@ func main() {
 	defer database.Close(db)
 
 	router := server.NewRouter(cfg)
-	server.RegisterRoutes(router)
+	server.RegisterRoutes(router, db)
 
 	server.Run(router, cfg)
 }
