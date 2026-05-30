@@ -11,6 +11,7 @@ func RunMigrations(db *gorm.DB) {
 	err := db.AutoMigrate(
 		&domain.User{},
 		&domain.UserProfile{},
+		&domain.OTPEntry{},
 	)
 	if err != nil {
 		log.Fatalf("[FATAL] Failed to run database migrations: %v", err)

@@ -17,10 +17,19 @@ type DatabaseConfig struct {
 	SSLRootCert string
 }
 
+type SmtpConfig struct {
+	Host     string
+	Port     string
+	Username string
+	Password string
+	From     string
+}
+
 type Config struct {
 	Port     string
 	AppEnv   string
 	Database DatabaseConfig
+	Smtp     SmtpConfig
 }
 
 func Load() *Config {
@@ -32,13 +41,20 @@ func Load() *Config {
 		Port:   getEnv("PORT", "8080"),
 		AppEnv: getEnv("APP_ENV", "development"),
 		Database: DatabaseConfig{
-			Host:     requireEnv("DB_HOST"),
-			Port:     getEnv("DB_PORT", "5432"),
-			User:     requireEnv("DB_USER"),
-			Password: requireEnv("DB_PASSWORD"),
-			Name:     requireEnv("DB_NAME"),
+			Host:        requireEnv("DB_HOST"),
+			Port:        getEnv("DB_PORT", "5432"),
+			User:        requireEnv("DB_USER"),
+			Password:    requireEnv("DB_PASSWORD"),
+			Name:        requireEnv("DB_NAME"),
 			SSLMode:     getEnv("DB_SSLMODE", "verify-full"),
 			SSLRootCert: requireEnv("DB_SSL_ROOT_CERT"),
+		},
+		Smtp: SmtpConfig{
+			Host:     getEnv("SMTP_HOST", ""),
+			Port:     getEnv("SMTP_PORT", "587"),
+			Username: getEnv("SMTP_USERNAME", ""),
+			Password: getEnv("SMTP_PASSWORD", ""),
+			From:     getEnv("SMTP_FROM", "noreply@tanipintar.com"),
 		},
 	}
 
@@ -90,4 +106,3 @@ func (c *Config) validate() {
 		log.Fatalf("[FATAL] SSL root certificate file not found: %s", c.Database.SSLRootCert)
 	}
 }
-

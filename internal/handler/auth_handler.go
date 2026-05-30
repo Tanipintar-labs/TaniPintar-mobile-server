@@ -67,7 +67,107 @@ func (h *AuthHandler) Register() gin.HandlerFunc {
 			return
 		}
 
-		dto.SuccessResponse(c, http.StatusCreated, "Registration successful", result)
+		dto.SuccessResponse(c, http.StatusCreated, "Registration successful, please verify your email", result)
+	}
+}
+
+func (h *AuthHandler) VerifyOTP() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req dto.VerifyOTPRequest
+
+		if err := c.ShouldBindJSON(&req); err != nil {
+			errs := formatValidationErrors(err)
+			dto.ValidationErrorResponse(c, errs)
+			return
+		}
+
+		h.logger.Info("OTP verification attempt",
+			slog.String("email", req.Email),
+			slog.String("ip", c.ClientIP()),
+		)
+
+		err := h.service.VerifyOTP(&req)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrOTPNotFound):
+				dto.ErrorResponse(c, http.StatusNotFound,
+					"Verification failed",
+					[]string{"No OTP found for this email, please register first"},
+				)
+			case errors.Is(err, service.ErrOTPExpired):
+				dto.ErrorResponse(c, http.StatusGone,
+					"Verification failed",
+					[]string{"OTP has expired, please request a new one"},
+				)
+			case errors.Is(err, service.ErrOTPInvalid):
+				dto.ErrorResponse(c, http.StatusUnprocessableEntity,
+					"Verification failed",
+					[]string{"Invalid OTP code"},
+				)
+			case errors.Is(err, service.ErrOTPFrozen):
+				dto.ErrorResponse(c, http.StatusTooManyRequests,
+					"Verification failed",
+					[]string{"Too many failed attempts, please try again in 15 minutes"},
+				)
+			default:
+				h.logger.Error("OTP verification failed",
+					slog.String("email", req.Email),
+					slog.String("error", err.Error()),
+				)
+				dto.ErrorResponse(c, http.StatusInternalServerError,
+					"Verification failed",
+					[]string{"An internal error occurred, please try again later"},
+				)
+			}
+			return
+		}
+
+		dto.SuccessResponse(c, http.StatusOK, "Email verified successfully", nil)
+	}
+}
+
+func (h *AuthHandler) ResendOTP() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req dto.ResendOTPRequest
+
+		if err := c.ShouldBindJSON(&req); err != nil {
+			errs := formatValidationErrors(err)
+			dto.ValidationErrorResponse(c, errs)
+			return
+		}
+
+		h.logger.Info("OTP resend request",
+			slog.String("email", req.Email),
+			slog.String("ip", c.ClientIP()),
+		)
+
+		err := h.service.ResendOTP(&req)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrUserNotFound):
+				dto.ErrorResponse(c, http.StatusNotFound,
+					"Resend failed",
+					[]string{"No unverified account found for this email"},
+				)
+			case errors.Is(err, service.ErrAlreadyVerified):
+				dto.ErrorResponse(c, http.StatusConflict,
+					"Resend failed",
+					[]string{"Email is already verified"},
+				)
+			default:
+				h.logger.Error("OTP resend failed",
+					slog.String("email", req.Email),
+					slog.String("error", err.Error()),
+				)
+				dto.ErrorResponse(c, http.StatusInternalServerError,
+					"Resend failed",
+					[]string{"An internal error occurred, please try again later"},
+				)
+			}
+			return
+		}
+
+		dto.SuccessResponse(c, http.StatusOK, "OTP sent successfully", nil)
 	}
 }
 
@@ -95,6 +195,8 @@ func formatFieldError(fe validator.FieldError) string {
 		return field + " must be at least " + fe.Param() + " characters"
 	case "max":
 		return field + " must not exceed " + fe.Param() + " characters"
+	case "len":
+		return field + " must be exactly " + fe.Param() + " characters"
 	case "eqfield":
 		return "password and password_confirmation must match"
 	default:

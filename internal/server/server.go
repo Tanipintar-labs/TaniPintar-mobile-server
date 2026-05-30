@@ -15,6 +15,7 @@ import (
 	"github.com/Tanipintar-labs/TaniPintar-mobile-server/internal/middleware"
 	"github.com/Tanipintar-labs/TaniPintar-mobile-server/internal/repository"
 	"github.com/Tanipintar-labs/TaniPintar-mobile-server/internal/service"
+	"github.com/Tanipintar-labs/TaniPintar-mobile-server/internal/worker"
 	"github.com/gin-gonic/gin"
 	"golang.org/x/time/rate"
 	"gorm.io/gorm"
@@ -31,7 +32,7 @@ func NewRouter(cfg *config.Config) *gin.Engine {
 	return router
 }
 
-func RegisterRoutes(router *gin.Engine, db *gorm.DB) {
+func RegisterRoutes(router *gin.Engine, db *gorm.DB, cfg *config.Config) {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: slog.LevelInfo,
 	}))
@@ -39,16 +40,30 @@ func RegisterRoutes(router *gin.Engine, db *gorm.DB) {
 	router.GET("/ping", handler.HealthCheck())
 
 	userRepo := repository.NewUserRepository(db)
-	authService := service.NewAuthService(db, userRepo, logger)
+	otpRepo := repository.NewOTPRepository(db)
+
+	var emailSender worker.EmailSender
+	if cfg.AppEnv == "production" && cfg.Smtp.Host != "" {
+		emailSender = worker.NewSmtpEmailSender(cfg.Smtp, logger)
+	} else {
+		emailSender = worker.NewLogEmailSender(logger)
+	}
+
+	authService := service.NewAuthService(db, userRepo, otpRepo, emailSender, logger)
 	authHandler := handler.NewAuthHandler(authService, logger)
+
+	ipLimiter := middleware.RateLimiter(rate.Every(12*time.Second), 5)
+	otpEmailLimiter := middleware.OTPEmailRateLimiter(60 * time.Second)
 
 	api := router.Group("/api")
 	{
-		api.POST("/register",
-			middleware.RateLimiter(rate.Every(12*time.Second), 5),
-			authHandler.Register(),
-		)
+		api.POST("/register", otpEmailLimiter, ipLimiter, authHandler.Register())
+		api.POST("/verify-otp", ipLimiter, authHandler.VerifyOTP())
+		api.POST("/resend-otp", otpEmailLimiter, ipLimiter, authHandler.ResendOTP())
 	}
+
+	cleanupWorker := worker.NewCleanupWorker(userRepo, otpRepo, logger)
+	cleanupWorker.Start()
 }
 
 func Run(router *gin.Engine, cfg *config.Config) {
