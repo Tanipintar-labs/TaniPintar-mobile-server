@@ -17,43 +17,55 @@ import (
 )
 
 var (
-	ErrEmailTaken        = errors.New("email is already registered and verified")
-	ErrInvalidDateFormat = errors.New("date_of_birth must be in YYYY-MM-DD format")
-	ErrOTPExpired        = errors.New("OTP has expired, please request a new one")
-	ErrOTPInvalid        = errors.New("invalid OTP code")
-	ErrOTPFrozen         = errors.New("too many failed attempts, please try again later")
-	ErrOTPNotFound       = errors.New("no OTP found for this email, please register first")
-	ErrUserNotFound      = errors.New("no unverified account found for this email")
-	ErrAlreadyVerified   = errors.New("email is already verified")
+	ErrEmailTaken         = errors.New("email is already registered and verified")
+	ErrInvalidDateFormat  = errors.New("date_of_birth must be in YYYY-MM-DD format")
+	ErrOTPExpired         = errors.New("OTP has expired, please request a new one")
+	ErrOTPInvalid         = errors.New("invalid OTP code")
+	ErrOTPFrozen          = errors.New("too many failed attempts, please try again later")
+	ErrOTPNotFound        = errors.New("no OTP found for this email, please register first")
+	ErrUserNotFound       = errors.New("no unverified account found for this email")
+	ErrAlreadyVerified    = errors.New("email is already verified")
+	ErrInvalidCredentials = errors.New("invalid email or password")
+	ErrEmailNotVerified   = errors.New("email is not verified")
+	ErrInvalidRefreshToken = errors.New("invalid or expired refresh token")
 )
 
 type AuthService interface {
 	Register(req *dto.RegisterRequest) (*dto.RegisterResponse, error)
 	VerifyOTP(req *dto.VerifyOTPRequest) error
 	ResendOTP(req *dto.ResendOTPRequest) error
+	Login(req *dto.LoginRequest) (*dto.LoginResponse, error)
+	RefreshToken(req *dto.RefreshTokenRequest) (*dto.LoginResponse, error)
+	GetUserProfile(userID uint) (*dto.UserProfileResponse, error)
 }
 
 type authService struct {
-	db          *gorm.DB
-	userRepo    repository.UserRepository
-	otpRepo     repository.OTPRepository
-	emailSender worker.EmailSender
-	logger      *slog.Logger
+	db           *gorm.DB
+	userRepo     repository.UserRepository
+	otpRepo      repository.OTPRepository
+	tokenRepo    repository.TokenRepository
+	tokenService TokenService
+	emailSender  worker.EmailSender
+	logger       *slog.Logger
 }
 
 func NewAuthService(
 	db *gorm.DB,
 	userRepo repository.UserRepository,
 	otpRepo repository.OTPRepository,
+	tokenRepo repository.TokenRepository,
+	tokenService TokenService,
 	emailSender worker.EmailSender,
 	logger *slog.Logger,
 ) AuthService {
 	return &authService{
-		db:          db,
-		userRepo:    userRepo,
-		otpRepo:     otpRepo,
-		emailSender: emailSender,
-		logger:      logger,
+		db:           db,
+		userRepo:     userRepo,
+		otpRepo:      otpRepo,
+		tokenRepo:    tokenRepo,
+		tokenService: tokenService,
+		emailSender:  emailSender,
+		logger:       logger,
 	}
 }
 
@@ -296,4 +308,115 @@ func (s *authService) generateAndSendOTP(email string) {
 	}
 
 	worker.SendOTPAsync(s.emailSender, s.logger, email, code)
+}
+
+func (s *authService) Login(req *dto.LoginRequest) (*dto.LoginResponse, error) {
+	email := strings.ToLower(strings.TrimSpace(req.Email))
+
+	user, err := s.userRepo.FindByEmail(email)
+	if err != nil {
+		s.logger.Error("failed to find user for login",
+			slog.String("email", email),
+			slog.String("error", err.Error()),
+		)
+		return nil, fmt.Errorf("failed to find user: %w", err)
+	}
+	if user == nil {
+		return nil, ErrInvalidCredentials
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.HashedPassword), []byte(req.Password)); err != nil {
+		s.logger.Warn("failed login attempt (wrong password)",
+			slog.String("email", email),
+		)
+		return nil, ErrInvalidCredentials
+	}
+
+	if !user.IsVerified {
+		s.logger.Warn("login attempt with unverified email",
+			slog.String("email", email),
+		)
+		return nil, ErrEmailNotVerified
+	}
+
+	return s.generateTokenPair(user.ID, user.Email)
+}
+
+func (s *authService) RefreshToken(req *dto.RefreshTokenRequest) (*dto.LoginResponse, error) {
+	existing, err := s.tokenRepo.FindByToken(req.RefreshToken)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find refresh token: %w", err)
+	}
+	if existing == nil {
+		return nil, ErrInvalidRefreshToken
+	}
+
+	if time.Now().After(existing.ExpiresAt) {
+		s.tokenRepo.DeleteByToken(req.RefreshToken)
+		return nil, ErrInvalidRefreshToken
+	}
+
+	s.tokenRepo.DeleteByToken(req.RefreshToken)
+
+	user, err := s.userRepo.FindByID(existing.UserID)
+	if err != nil || user == nil {
+		return nil, fmt.Errorf("failed to find user for token refresh: %w", err)
+	}
+
+	s.logger.Info("token refreshed",
+		slog.Uint64("user_id", uint64(user.ID)),
+		slog.String("email", user.Email),
+	)
+
+	return s.generateTokenPair(user.ID, user.Email)
+}
+
+func (s *authService) GetUserProfile(userID uint) (*dto.UserProfileResponse, error) {
+	user, err := s.userRepo.FindByID(userID)
+	if err != nil || user == nil {
+		return nil, fmt.Errorf("failed to find user: %w", err)
+	}
+
+	return &dto.UserProfileResponse{
+		UserID:      user.ID,
+		Email:       user.Email,
+		FullName:    user.Profile.FullName,
+		BirthPlace:  user.Profile.BirthPlace,
+		DateOfBirth: user.Profile.DateOfBirth.Format("2006-01-02"),
+	}, nil
+}
+
+func (s *authService) generateTokenPair(userID uint, email string) (*dto.LoginResponse, error) {
+	accessToken, expiresIn, err := s.tokenService.GenerateAccessToken(userID, email)
+	if err != nil {
+		s.logger.Error("failed to generate access token", slog.String("error", err.Error()))
+		return nil, fmt.Errorf("failed to generate access token: %w", err)
+	}
+
+	refreshTokenStr, err := s.tokenService.GenerateRefreshTokenString()
+	if err != nil {
+		s.logger.Error("failed to generate refresh token", slog.String("error", err.Error()))
+		return nil, fmt.Errorf("failed to generate refresh token: %w", err)
+	}
+
+	rt := &domain.RefreshToken{
+		UserID:    userID,
+		Token:     refreshTokenStr,
+		ExpiresAt: time.Now().Add(s.tokenService.GetRefreshTokenExpiry()),
+	}
+	if err := s.tokenRepo.Create(rt); err != nil {
+		s.logger.Error("failed to save refresh token", slog.String("error", err.Error()))
+		return nil, fmt.Errorf("failed to save refresh token: %w", err)
+	}
+
+	s.logger.Info("user logged in successfully",
+		slog.Uint64("user_id", uint64(userID)),
+		slog.String("email", email),
+	)
+
+	return &dto.LoginResponse{
+		AccessToken:  accessToken,
+		RefreshToken: refreshTokenStr,
+		ExpiresIn:    int64(expiresIn.Seconds()),
+	}, nil
 }

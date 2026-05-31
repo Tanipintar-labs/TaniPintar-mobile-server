@@ -41,6 +41,7 @@ func RegisterRoutes(router *gin.Engine, db *gorm.DB, cfg *config.Config) {
 
 	userRepo := repository.NewUserRepository(db)
 	otpRepo := repository.NewOTPRepository(db)
+	tokenRepo := repository.NewTokenRepository(db)
 
 	var emailSender worker.EmailSender
 	if cfg.AppEnv == "production" && cfg.Smtp.Host != "" {
@@ -49,7 +50,8 @@ func RegisterRoutes(router *gin.Engine, db *gorm.DB, cfg *config.Config) {
 		emailSender = worker.NewLogEmailSender(logger)
 	}
 
-	authService := service.NewAuthService(db, userRepo, otpRepo, emailSender, logger)
+	tokenService := service.NewTokenService(cfg.Jwt)
+	authService := service.NewAuthService(db, userRepo, otpRepo, tokenRepo, tokenService, emailSender, logger)
 	authHandler := handler.NewAuthHandler(authService, logger)
 
 	ipLimiter := middleware.RateLimiter(rate.Every(12*time.Second), 5)
@@ -60,9 +62,17 @@ func RegisterRoutes(router *gin.Engine, db *gorm.DB, cfg *config.Config) {
 		api.POST("/register", otpEmailLimiter, ipLimiter, authHandler.Register())
 		api.POST("/verify-otp", ipLimiter, authHandler.VerifyOTP())
 		api.POST("/resend-otp", otpEmailLimiter, ipLimiter, authHandler.ResendOTP())
+		api.POST("/login", ipLimiter, authHandler.Login())
+		api.POST("/refresh-token", ipLimiter, authHandler.RefreshToken())
+
+		protected := api.Group("/")
+		protected.Use(middleware.AuthMiddleware(tokenService))
+		{
+			protected.GET("/me", authHandler.Me())
+		}
 	}
 
-	cleanupWorker := worker.NewCleanupWorker(userRepo, otpRepo, logger)
+	cleanupWorker := worker.NewCleanupWorker(userRepo, otpRepo, tokenRepo, logger)
 	cleanupWorker.Start()
 }
 

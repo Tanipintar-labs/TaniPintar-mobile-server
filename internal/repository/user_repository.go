@@ -12,6 +12,7 @@ var ErrEmailAlreadyExists = errors.New("email already registered")
 
 type UserRepository interface {
 	FindByEmail(email string) (*domain.User, error)
+	FindByID(id uint) (*domain.User, error)
 	CreateWithProfile(tx *gorm.DB, user *domain.User) error
 	UpdateWithProfile(tx *gorm.DB, user *domain.User, profile *domain.UserProfile) error
 	SetVerified(userID uint) error
@@ -29,6 +30,18 @@ func NewUserRepository(db *gorm.DB) UserRepository {
 func (r *userRepository) FindByEmail(email string) (*domain.User, error) {
 	var user domain.User
 	result := r.db.Preload("Profile").Where("email = ?", email).First(&user)
+	if result.Error != nil {
+		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, result.Error
+	}
+	return &user, nil
+}
+
+func (r *userRepository) FindByID(id uint) (*domain.User, error) {
+	var user domain.User
+	result := r.db.Preload("Profile").First(&user, id)
 	if result.Error != nil {
 		if errors.Is(result.Error, gorm.ErrRecordNotFound) {
 			return nil, nil

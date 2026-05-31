@@ -9,18 +9,20 @@ import (
 )
 
 type CleanupWorker struct {
-	cron     *cron.Cron
-	userRepo repository.UserRepository
-	otpRepo  repository.OTPRepository
-	logger   *slog.Logger
+	cron      *cron.Cron
+	userRepo  repository.UserRepository
+	otpRepo   repository.OTPRepository
+	tokenRepo repository.TokenRepository
+	logger    *slog.Logger
 }
 
-func NewCleanupWorker(userRepo repository.UserRepository, otpRepo repository.OTPRepository, logger *slog.Logger) *CleanupWorker {
+func NewCleanupWorker(userRepo repository.UserRepository, otpRepo repository.OTPRepository, tokenRepo repository.TokenRepository, logger *slog.Logger) *CleanupWorker {
 	return &CleanupWorker{
-		cron:     cron.New(),
-		userRepo: userRepo,
-		otpRepo:  otpRepo,
-		logger:   logger,
+		cron:      cron.New(),
+		userRepo:  userRepo,
+		otpRepo:   otpRepo,
+		tokenRepo: tokenRepo,
+		logger:    logger,
 	}
 }
 
@@ -28,6 +30,7 @@ func (w *CleanupWorker) Start() {
 	w.cron.AddFunc("@every 1h", func() {
 		w.cleanupUnverifiedAccounts()
 		w.cleanupExpiredOTPs()
+		w.cleanupExpiredTokens()
 	})
 
 	w.cron.Start()
@@ -67,6 +70,22 @@ func (w *CleanupWorker) cleanupExpiredOTPs() {
 
 	if count > 0 {
 		w.logger.Info("cleaned up expired OTP entries",
+			slog.Int64("deleted_count", count),
+		)
+	}
+}
+
+func (w *CleanupWorker) cleanupExpiredTokens() {
+	count, err := w.tokenRepo.DeleteExpired()
+	if err != nil {
+		w.logger.Error("failed to cleanup expired refresh tokens",
+			slog.String("error", err.Error()),
+		)
+		return
+	}
+
+	if count > 0 {
+		w.logger.Info("cleaned up expired refresh tokens",
 			slog.Int64("deleted_count", count),
 		)
 	}

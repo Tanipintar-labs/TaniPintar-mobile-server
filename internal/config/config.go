@@ -3,6 +3,7 @@ package config
 import (
 	"log"
 	"os"
+	"strconv"
 
 	"github.com/joho/godotenv"
 )
@@ -25,11 +26,18 @@ type SmtpConfig struct {
 	From     string
 }
 
+type JwtConfig struct {
+	Secret             string
+	AccessExpiryMinutes int
+	RefreshExpiryDays   int
+}
+
 type Config struct {
 	Port     string
 	AppEnv   string
 	Database DatabaseConfig
 	Smtp     SmtpConfig
+	Jwt      JwtConfig
 }
 
 func Load() *Config {
@@ -55,6 +63,11 @@ func Load() *Config {
 			Username: getEnv("SMTP_USERNAME", ""),
 			Password: getEnv("SMTP_PASSWORD", ""),
 			From:     getEnv("SMTP_FROM", "noreply@tanipintar.com"),
+		},
+		Jwt: JwtConfig{
+			Secret:              requireEnv("JWT_SECRET"),
+			AccessExpiryMinutes: getEnvAsInt("JWT_ACCESS_EXPIRY_MINUTES", 15),
+			RefreshExpiryDays:   getEnvAsInt("JWT_REFRESH_EXPIRY_DAYS", 7),
 		},
 	}
 
@@ -88,6 +101,27 @@ func requireEnv(key string) string {
 
 	if value == "" {
 		log.Fatalf("[FATAL] Required environment variable %s is empty", key)
+	}
+
+	return value
+}
+
+func getEnvAsInt(key string, fallback int) int {
+	valueStr, exists := os.LookupEnv(key)
+	if !exists || valueStr == "" {
+		log.Printf("[WARNING] Environment variable %s is not set, using default: %d", key, fallback)
+		return fallback
+	}
+
+	value, err := strconv.Atoi(valueStr)
+	if err != nil {
+		log.Printf("[WARNING] Environment variable %s has invalid integer value %q, using default: %d", key, valueStr, fallback)
+		return fallback
+	}
+
+	if value <= 0 {
+		log.Printf("[WARNING] Environment variable %s must be positive, using default: %d", key, fallback)
+		return fallback
 	}
 
 	return value

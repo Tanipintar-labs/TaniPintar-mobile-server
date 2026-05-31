@@ -171,6 +171,111 @@ func (h *AuthHandler) ResendOTP() gin.HandlerFunc {
 	}
 }
 
+func (h *AuthHandler) Login() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req dto.LoginRequest
+
+		if err := c.ShouldBindJSON(&req); err != nil {
+			errs := formatValidationErrors(err)
+			dto.ValidationErrorResponse(c, errs)
+			return
+		}
+
+		h.logger.Info("login attempt",
+			slog.String("email", req.Email),
+			slog.String("ip", c.ClientIP()),
+		)
+
+		result, err := h.service.Login(&req)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrInvalidCredentials):
+				dto.ErrorResponse(c, http.StatusUnauthorized,
+					"Login failed",
+					[]string{"Invalid email or password"},
+				)
+			case errors.Is(err, service.ErrEmailNotVerified):
+				dto.ErrorResponse(c, http.StatusForbidden,
+					"Login failed",
+					[]string{"Please verify your email before logging in"},
+				)
+			default:
+				h.logger.Error("login failed",
+					slog.String("email", req.Email),
+					slog.String("error", err.Error()),
+				)
+				dto.ErrorResponse(c, http.StatusInternalServerError,
+					"Login failed",
+					[]string{"An internal error occurred, please try again later"},
+				)
+			}
+			return
+		}
+
+		dto.SuccessResponse(c, http.StatusOK, "Login successful", result)
+	}
+}
+
+func (h *AuthHandler) RefreshToken() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req dto.RefreshTokenRequest
+
+		if err := c.ShouldBindJSON(&req); err != nil {
+			errs := formatValidationErrors(err)
+			dto.ValidationErrorResponse(c, errs)
+			return
+		}
+
+		result, err := h.service.RefreshToken(&req)
+		if err != nil {
+			if errors.Is(err, service.ErrInvalidRefreshToken) {
+				dto.ErrorResponse(c, http.StatusUnauthorized,
+					"Token refresh failed",
+					[]string{"Invalid or expired refresh token"},
+				)
+			} else {
+				h.logger.Error("token refresh failed",
+					slog.String("error", err.Error()),
+				)
+				dto.ErrorResponse(c, http.StatusInternalServerError,
+					"Token refresh failed",
+					[]string{"An internal error occurred, please try again later"},
+				)
+			}
+			return
+		}
+
+		dto.SuccessResponse(c, http.StatusOK, "Token refreshed successfully", result)
+	}
+}
+
+func (h *AuthHandler) Me() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		userID, exists := c.Get("user_id")
+		if !exists {
+			dto.ErrorResponse(c, http.StatusUnauthorized,
+				"Authentication required",
+				[]string{"User not authenticated"},
+			)
+			return
+		}
+
+		profile, err := h.service.GetUserProfile(userID.(uint))
+		if err != nil {
+			h.logger.Error("failed to get user profile",
+				slog.String("error", err.Error()),
+			)
+			dto.ErrorResponse(c, http.StatusInternalServerError,
+				"Failed to get profile",
+				[]string{"An internal error occurred, please try again later"},
+			)
+			return
+		}
+
+		dto.SuccessResponse(c, http.StatusOK, "Profile retrieved successfully", profile)
+	}
+}
+
 func formatValidationErrors(err error) []string {
 	var ve validator.ValidationErrors
 	if errors.As(err, &ve) {

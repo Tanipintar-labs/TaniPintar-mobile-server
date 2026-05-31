@@ -12,6 +12,7 @@ func RunMigrations(db *gorm.DB) {
 		&domain.User{},
 		&domain.UserProfile{},
 		&domain.OTPEntry{},
+		&domain.RefreshToken{},
 	)
 	if err != nil {
 		log.Fatalf("[FATAL] Failed to run database migrations: %v", err)

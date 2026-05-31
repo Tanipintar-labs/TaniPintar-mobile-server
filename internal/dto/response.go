@@ -18,6 +18,20 @@ type RegisterResponse struct {
 	Email  string `json:"email"`
 }
 
+type LoginResponse struct {
+	AccessToken  string `json:"access_token"`
+	RefreshToken string `json:"refresh_token"`
+	ExpiresIn    int64  `json:"expires_in"`
+}
+
+type UserProfileResponse struct {
+	UserID      uint   `json:"user_id"`
+	Email       string `json:"email"`
+	FullName    string `json:"full_name"`
+	BirthPlace  string `json:"birth_place"`
+	DateOfBirth string `json:"date_of_birth"`
+}
+
 func SuccessResponse(c *gin.Context, statusCode int, message string, data interface{}) {
 	c.JSON(statusCode, Response{
 		Success: true,
